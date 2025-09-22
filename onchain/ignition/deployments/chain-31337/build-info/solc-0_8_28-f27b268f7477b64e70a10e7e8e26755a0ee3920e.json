@@ -1,0 +1,39 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_28-f27b268f7477b64e70a10e7e8e26755a0ee3920e",
+  "solcVersion": "0.8.28",
+  "solcLongVersion": "0.8.28+commit.7893614a",
+  "userSourceNameMap": {
+    "contracts/SimpleRealEstate.sol": "project/contracts/SimpleRealEstate.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "cancun",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode",
+            "evm.deployedBytecode",
+            "evm.methodIdentifiers",
+            "metadata"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/SimpleRealEstate.sol": {
+        "content": "// SPDX-License-Identifier: MIT\r\npragma solidity ^0.8.28;\r\n\r\ncontract SimpleRealEstate {\r\n    struct Listing {\r\n        address payable seller;\r\n        uint256 price;        // in wei\r\n        string  image;        // URL or IPFS hash\r\n        string  title;        // \"2BHK in Pune\"\r\n        string  location_;    // \"Wakad, Pune\"\r\n        bool    sold;\r\n        address buyer;\r\n    }\r\n\r\n    Listing[] private listings;\r\n\r\n    event Listed(uint256 indexed id, address indexed seller, uint256 price);\r\n    event Purchased(uint256 indexed id, address indexed buyer, uint256 price);\r\n\r\n    // Create a listing\r\n    function list(\r\n        uint256 priceWei,\r\n        string calldata image,\r\n        string calldata title,\r\n        string calldata location_\r\n    ) external returns (uint256 id) {\r\n        require(priceWei > 0, \"price=0\");\r\n        listings.push(Listing(payable(msg.sender), priceWei, image, title, location_, false, address(0)));\r\n        id = listings.length - 1;\r\n        emit Listed(id, msg.sender, priceWei);\r\n    }\r\n\r\n    // Anyone can read a listing\r\n    function get(uint256 id) external view returns (\r\n        address seller,\r\n        uint256 price,\r\n        string memory image,\r\n        string memory title,\r\n        string memory location_,\r\n        bool sold,\r\n        address buyer\r\n    ) {\r\n        Listing storage l = listings[id];\r\n        return (l.seller, l.price, l.image, l.title, l.location_, l.sold, l.buyer);\r\n    }\r\n\r\n    function total() external view returns (uint256) { return listings.length; }\r\n\r\n    // Buy the property at fixed price (direct payout to seller)\r\n    function buy(uint256 id) external payable {\r\n        Listing storage l = listings[id];\r\n        require(!l.sold, \"sold\");\r\n        require(msg.value == l.price, \"price mismatch\");\r\n        l.sold = true;\r\n        l.buyer = msg.sender;\r\n\r\n        // minimal reentrancy protection: state change before transfer + call pattern\r\n        (bool ok, ) = l.seller.call{value: msg.value}(\"\");\r\n        require(ok, \"payout failed\");\r\n\r\n        emit Purchased(id, msg.sender, msg.value);\r\n    }\r\n}\r\n"
+      }
+    }
+  }
+}
