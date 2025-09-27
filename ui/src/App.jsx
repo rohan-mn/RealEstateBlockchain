@@ -1,6 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { createPublicClient, createWalletClient, custom, formatEther } from "viem";
-import { localhost } from "viem/chains";
+import {
+  createPublicClient,
+  createWalletClient,
+  custom,
+  formatEther,
+} from "viem";
+import { hardhat } from "viem/chains"; // <<— use 31337 instead of localhost(1337)
 import { SIMPLE_RE_ABI } from "./abi";
 import "./App.css";
 
@@ -29,7 +34,9 @@ function Navbar({ account, onConnect }) {
             {account.slice(0, 6)}…{account.slice(-4)}
           </div>
         ) : (
-          <button className="btn btn--primary" onClick={onConnect}>Connect Wallet</button>
+          <button className="btn btn--primary" onClick={onConnect}>
+            Connect Wallet
+          </button>
         )}
       </div>
     </nav>
@@ -63,7 +70,9 @@ function PropertyCard({ listing, onBuy, loading }) {
     <article className="card">
       <div className="card__media">
         <img src={listing.image} alt={listing.title} />
-        <span className={`badge ${listing.sold ? "badge--sold" : "badge--ok"}`}>{status}</span>
+        <span className={`badge ${listing.sold ? "badge--sold" : "badge--ok"}`}>
+          {status}
+        </span>
       </div>
       <div className="card__body">
         <h3 className="card__title">{listing.title}</h3>
@@ -94,10 +103,11 @@ export default function App() {
   const [listing, setListing] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  // Target chain = Hardhat (31337)
   const publicClient = useMemo(
     () =>
       createPublicClient({
-        chain: localhost,
+        chain: hardhat,
         transport: custom(window.ethereum),
       }),
     []
@@ -105,13 +115,44 @@ export default function App() {
 
   const walletClient = useMemo(() => {
     return window.ethereum
-      ? createWalletClient({ chain: localhost, transport: custom(window.ethereum) })
+      ? createWalletClient({ chain: hardhat, transport: custom(window.ethereum) })
       : null;
   }, []);
 
+  async function ensureHardhatChain() {
+    if (!window.ethereum) return;
+    const targetHex = "0x7A69"; // 31337
+    try {
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: targetHex }],
+      });
+    } catch (err) {
+      // If chain is not added in MetaMask
+      if (err?.code === 4902) {
+        await window.ethereum.request({
+          method: "wallet_addEthereumChain",
+          params: [
+            {
+              chainId: targetHex,
+              chainName: "Hardhat Local",
+              rpcUrls: ["http://127.0.0.1:8545"],
+              nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+            },
+          ],
+        });
+      } else {
+        throw err;
+      }
+    }
+  }
+
   async function connect() {
     if (!window.ethereum) return alert("Install MetaMask");
-    const [addr] = await window.ethereum.request({ method: "eth_requestAccounts" });
+    await ensureHardhatChain();
+    const [addr] = await window.ethereum.request({
+      method: "eth_requestAccounts",
+    });
     setAccount(addr);
   }
 
@@ -149,22 +190,33 @@ export default function App() {
   async function buy() {
     if (!walletClient) return alert("No wallet");
     if (!listing) return;
+    if (!account) return alert("Connect wallet");
+
     setLoading(true);
     try {
-      const data = await publicClient.encodeFunctionData({
+      // Make sure wallet is on the same chain (31337)
+      await ensureHardhatChain();
+
+      const hash = await walletClient.writeContract({
+        address: CONTRACT_ADDRESS,
         abi: SIMPLE_RE_ABI,
         functionName: "buy",
         args: [0n],
+        account,
+        value: listing.price, // wei from chain
       });
-      await walletClient.sendTransaction({
-        to: CONTRACT_ADDRESS,
-        data,
-        value: listing.price,
-      });
-      setTimeout(fetchListing, 1200);
+
+      await publicClient.waitForTransactionReceipt({ hash });
+      await fetchListing();
+      alert("Purchase successful");
     } catch (e) {
       console.error(e);
-      alert(e?.shortMessage || "Buy failed");
+      const msg =
+        e?.shortMessage ||
+        e?.message ||
+        e?.cause?.shortMessage ||
+        "Buy failed";
+      alert(msg);
     } finally {
       setLoading(false);
     }
@@ -193,7 +245,6 @@ export default function App() {
           </div>
         ) : (
           <div className="grid">
-            {/* If you seed more listings on-chain, map over them. For demo we show single card. */}
             <PropertyCard listing={listing} onBuy={buy} loading={loading} />
           </div>
         )}

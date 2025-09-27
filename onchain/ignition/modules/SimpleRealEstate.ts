@@ -6,8 +6,8 @@ export default buildModule("SimpleRealEstateModule", (m) => {
   // Seed one listing (≈ 1 ETH) — change image/title/location as you like
   m.call(re, "list", [
     1_000_000_000_000_000_000n,
-    "https://images.unsplash.com/photo-1560185008-b033106af2b8",
-    "Modern 2BHK Apartment",
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ3Rd2gw1Y1UnSvinELcD0jOIT_e3DQm0rrzA&s",
+    "Modern Villa",
     "Wakad, Pune"
   ]);
 
