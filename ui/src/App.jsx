@@ -4,8 +4,10 @@ import {
   createWalletClient,
   custom,
   formatEther,
+  parseEther,
+  http,
 } from "viem";
-import { hardhat } from "viem/chains"; // <<— use 31337 instead of localhost(1337)
+import { hardhat } from "viem/chains";
 import { SIMPLE_RE_ABI } from "./abi";
 import "./App.css";
 
@@ -98,21 +100,102 @@ function PropertyCard({ listing, onBuy, loading }) {
   );
 }
 
+function SellForm({ onList }) {
+  const [title, setTitle] = useState("");
+  const [loc, setLoc] = useState("");
+  const [img, setImg] = useState("");
+  const [priceEth, setPriceEth] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!title || !loc || !img || !priceEth) return alert("Fill all fields");
+    setBusy(true);
+    try {
+      const priceWei = parseEther(priceEth);
+      await onList(priceWei, img.trim(), title.trim(), loc.trim());
+      setTitle("");
+      setLoc("");
+      setImg("");
+      setPriceEth("");
+      alert("Listing created!");
+    } catch (err) {
+      console.error(err);
+      alert(err?.shortMessage || err?.message || "List failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="sell">
+      <div className="container">
+        <h2>Sell your property</h2>
+        <p className="muted">
+          Enter the details below to publish a listing on-chain.
+        </p>
+        <form className="sell__form" onSubmit={handleSubmit}>
+          <div className="form__row">
+            <label>Title</label>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g., Spacious 3BHK Apartment"
+            />
+          </div>
+          <div className="form__row">
+            <label>Location</label>
+            <input
+              value={loc}
+              onChange={(e) => setLoc(e.target.value)}
+              placeholder="e.g., Wakad, Pune"
+            />
+          </div>
+          <div className="form__row">
+            <label>Image URL</label>
+            <input
+              value={img}
+              onChange={(e) => setImg(e.target.value)}
+              placeholder="https://…"
+            />
+          </div>
+          <div className="form__row">
+            <label>Price (ETH)</label>
+            <input
+              type="number"
+              step="0.0001"
+              min="0"
+              value={priceEth}
+              onChange={(e) => setPriceEth(e.target.value)}
+              placeholder="1.0"
+            />
+          </div>
+          <button className="btn btn--primary" disabled={busy}>
+            {busy ? "Listing…" : "Create Listing"}
+          </button>
+        </form>
+      </div>
+    </section>
+  );
+}
+
 export default function App() {
   const [account, setAccount] = useState("");
-  const [listing, setListing] = useState(null);
+  const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(false);
 
-  // Target chain = Hardhat (31337)
+  // ✅ Reads via HTTP RPC (always Hardhat node)
   const publicClient = useMemo(
     () =>
       createPublicClient({
         chain: hardhat,
-        transport: custom(window.ethereum),
+        transport: http("http://127.0.0.1:8545"),
       }),
     []
   );
 
+  // ✅ Writes via MetaMask
   const walletClient = useMemo(() => {
     return window.ethereum
       ? createWalletClient({ chain: hardhat, transport: custom(window.ethereum) })
@@ -128,18 +211,15 @@ export default function App() {
         params: [{ chainId: targetHex }],
       });
     } catch (err) {
-      // If chain is not added in MetaMask
       if (err?.code === 4902) {
         await window.ethereum.request({
           method: "wallet_addEthereumChain",
-          params: [
-            {
-              chainId: targetHex,
-              chainName: "Hardhat Local",
-              rpcUrls: ["http://127.0.0.1:8545"],
-              nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
-            },
-          ],
+          params: [{
+            chainId: targetHex,
+            chainName: "Hardhat Local",
+            rpcUrls: ["http://127.0.0.1:8545"],
+            nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+          }],
         });
       } else {
         throw err;
@@ -150,80 +230,93 @@ export default function App() {
   async function connect() {
     if (!window.ethereum) return alert("Install MetaMask");
     await ensureHardhatChain();
-    const [addr] = await window.ethereum.request({
-      method: "eth_requestAccounts",
-    });
+    const [addr] = await window.ethereum.request({ method: "eth_requestAccounts" });
     setAccount(addr);
   }
 
-  async function fetchListing() {
-    const total = await publicClient.readContract({
-      address: CONTRACT_ADDRESS,
-      abi: SIMPLE_RE_ABI,
-      functionName: "total",
-      args: [],
-    });
+  async function fetchAll() {
+    setFetching(true);
+    try {
+      const total = await publicClient.readContract({
+        address: CONTRACT_ADDRESS,
+        abi: SIMPLE_RE_ABI,
+        functionName: "total",
+      });
 
-    if (total === 0n) {
-      setListing(null);
-      return;
+      const count = Number(total);
+      console.log("Total listings on-chain:", count, "at", CONTRACT_ADDRESS);
+
+      if (count === 0) {
+        setListings([]);
+        return;
+      }
+
+      const calls = Array.from({ length: count }, (_, i) =>
+        publicClient.readContract({
+          address: CONTRACT_ADDRESS,
+          abi: SIMPLE_RE_ABI,
+          functionName: "get",
+          args: [BigInt(i)],
+        }).then((r) => ({
+          id: i,
+          seller: r[0],
+          price: r[1],
+          image: r[2],
+          title: r[3],
+          location: r[4],
+          sold: r[5],
+          buyer: r[6],
+        }))
+      );
+
+      setListings(await Promise.all(calls));
+    } finally {
+      setFetching(false);
     }
-
-    const res = await publicClient.readContract({
-      address: CONTRACT_ADDRESS,
-      abi: SIMPLE_RE_ABI,
-      functionName: "get",
-      args: [0n],
-    });
-
-    setListing({
-      seller: res[0],
-      price: res[1],
-      image: res[2],
-      title: res[3],
-      location: res[4],
-      sold: res[5],
-      buyer: res[6],
-    });
   }
 
-  async function buy() {
+  async function buy(id, priceWei) {
     if (!walletClient) return alert("No wallet");
-    if (!listing) return;
     if (!account) return alert("Connect wallet");
-
     setLoading(true);
     try {
-      // Make sure wallet is on the same chain (31337)
       await ensureHardhatChain();
-
       const hash = await walletClient.writeContract({
         address: CONTRACT_ADDRESS,
         abi: SIMPLE_RE_ABI,
         functionName: "buy",
-        args: [0n],
+        args: [BigInt(id)],
         account,
-        value: listing.price, // wei from chain
+        value: priceWei,
       });
-
       await publicClient.waitForTransactionReceipt({ hash });
-      await fetchListing();
+      await fetchAll();
       alert("Purchase successful");
     } catch (e) {
       console.error(e);
-      const msg =
-        e?.shortMessage ||
-        e?.message ||
-        e?.cause?.shortMessage ||
-        "Buy failed";
-      alert(msg);
+      alert(e?.shortMessage || e?.message || "Buy failed");
     } finally {
       setLoading(false);
     }
   }
 
+  async function listNew(priceWei, image, title, location_) {
+    if (!walletClient) throw new Error("No wallet");
+    if (!account) throw new Error("Connect wallet");
+    await ensureHardhatChain();
+    const hash = await walletClient.writeContract({
+      address: CONTRACT_ADDRESS,
+      abi: SIMPLE_RE_ABI,
+      functionName: "list",
+      args: [priceWei, image, title, location_],
+      account,
+    });
+    await publicClient.waitForTransactionReceipt({ hash });
+    await fetchAll();
+  }
+
   useEffect(() => {
-    fetchListing();
+    fetchAll();
   }, []);
 
   return (
@@ -235,20 +328,32 @@ export default function App() {
         <div className="section__head">
           <h2>Featured Properties</h2>
           <p className="muted">Handpicked homes across prime locations</p>
+          <small className="muted">On-chain count: {listings.length}</small>
         </div>
 
-        {!listing ? (
+        {fetching ? (
           <div className="empty">
             <div className="skeleton" />
             <div className="skeleton" />
             <div className="skeleton" />
           </div>
+        ) : listings.length === 0 ? (
+          <div className="empty">No listings yet. Be the first to sell!</div>
         ) : (
           <div className="grid">
-            <PropertyCard listing={listing} onBuy={buy} loading={loading} />
+            {listings.map((l) => (
+              <PropertyCard
+                key={l.id}
+                listing={l}
+                loading={loading}
+                onBuy={() => buy(l.id, l.price)}
+              />
+            ))}
           </div>
         )}
       </main>
+
+      <SellForm onList={listNew} />
 
       <footer className="footer">
         <div className="container footer__inner">
@@ -261,7 +366,9 @@ export default function App() {
             <li>Terms</li>
             <li>Support</li>
           </ul>
-          <div className="footer__copy">© {new Date().getFullYear()} Millow Lite</div>
+          <div className="footer__copy">
+            © {new Date().getFullYear()} Millow Lite
+          </div>
         </div>
       </footer>
     </>
