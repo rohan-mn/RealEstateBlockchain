@@ -106,19 +106,20 @@ function SellForm({ onList }) {
   const [img, setImg] = useState("");
   const [priceEth, setPriceEth] = useState("");
   const [busy, setBusy] = useState(false);
+  const [touched, setTouched] = useState({});
+
+  const valid = title && loc && img && priceEth && Number(priceEth) > 0;
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!title || !loc || !img || !priceEth) return alert("Fill all fields");
+    setTouched({ title: true, loc: true, img: true, priceEth: true });
+    if (!valid) return;
+
     setBusy(true);
     try {
       const priceWei = parseEther(priceEth);
       await onList(priceWei, img.trim(), title.trim(), loc.trim());
-      setTitle("");
-      setLoc("");
-      setImg("");
-      setPriceEth("");
-      alert("Listing created!");
+      setTitle(""); setLoc(""); setImg(""); setPriceEth("");
     } catch (err) {
       console.error(err);
       alert(err?.shortMessage || err?.message || "List failed");
@@ -128,56 +129,109 @@ function SellForm({ onList }) {
   }
 
   return (
-    <section className="sell">
+    <section className="sell-section">
       <div className="container">
-        <h2>Sell your property</h2>
-        <p className="muted">
-          Enter the details below to publish a listing on-chain.
-        </p>
-        <form className="sell__form" onSubmit={handleSubmit}>
-          <div className="form__row">
-            <label>Title</label>
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g., Spacious 3BHK Apartment"
-            />
+        <div className="sell-card">
+          <div className="sell-head">
+            <div>
+              <h2>Sell your property</h2>
+              <p className="muted">
+                Publish a new listing with title, location, image and price.
+              </p>
+            </div>
+            <div className="sell-badge">On-chain</div>
           </div>
-          <div className="form__row">
-            <label>Location</label>
-            <input
-              value={loc}
-              onChange={(e) => setLoc(e.target.value)}
-              placeholder="e.g., Wakad, Pune"
-            />
+
+          <div className="sell-grid">
+            {/* Form */}
+            <form className="sell-form" onSubmit={handleSubmit} noValidate>
+              <div className={`field ${touched.title && !title ? "error" : ""}`}>
+                <label>Title</label>
+                <input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  onBlur={() => setTouched((t) => ({ ...t, title: true }))}
+                  placeholder="Spacious 3BHK Apartment"
+                />
+                {touched.title && !title && <span className="hint">Required</span>}
+              </div>
+
+              <div className={`field ${touched.loc && !loc ? "error" : ""}`}>
+                <label>Location</label>
+                <input
+                  value={loc}
+                  onChange={(e) => setLoc(e.target.value)}
+                  onBlur={() => setTouched((t) => ({ ...t, loc: true }))}
+                  placeholder="Wakad, Pune"
+                />
+                {touched.loc && !loc && <span className="hint">Required</span>}
+              </div>
+
+              <div className={`field ${touched.img && !img ? "error" : ""}`}>
+                <label>Image URL</label>
+                <input
+                  value={img}
+                  onChange={(e) => setImg(e.target.value)}
+                  onBlur={() => setTouched((t) => ({ ...t, img: true }))}
+                  placeholder="https://…"
+                />
+                {touched.img && !img && <span className="hint">Required</span>}
+              </div>
+
+              <div className={`field ${touched.priceEth && (!priceEth || Number(priceEth) <= 0) ? "error" : ""}`}>
+                <label>Price</label>
+                <div className="input-eth">
+                  <input
+                    type="number"
+                    step="0.0001"
+                    min="0"
+                    value={priceEth}
+                    onChange={(e) => setPriceEth(e.target.value)}
+                    onBlur={() => setTouched((t) => ({ ...t, priceEth: true }))}
+                    placeholder="1.00"
+                  />
+                  <span>ETH</span>
+                </div>
+                {touched.priceEth && (!priceEth || Number(priceEth) <= 0) && (
+                  <span className="hint">Enter a positive amount</span>
+                )}
+              </div>
+
+              <button className="btn btn--primary btn-wide" disabled={busy || !valid}>
+                {busy ? "Listing…" : "Create Listing"}
+              </button>
+            </form>
+
+            {/* Live Preview */}
+            <div className="sell-preview">
+              <div className="preview-card">
+                <div className="preview-media">
+                  {img ? (
+                    <img src={img} alt="Preview" onError={(e) => (e.currentTarget.style.opacity = "0.2")} />
+                  ) : (
+                    <div className="preview-placeholder">Image preview</div>
+                  )}
+                </div>
+                <div className="preview-body">
+                  <h3>{title || "Property title"}</h3>
+                  <p className="muted">{loc || "Location"}</p>
+                  <div className="preview-footer">
+                    <div className="price">{priceEth ? `${priceEth} ETH` : "— ETH"}</div>
+                    <span className="badge badge--ok">NEW</span>
+                  </div>
+                </div>
+              </div>
+              <p className="tiny muted">
+                Tip: Use a 16:9 image for best fit. You can update price or re-list anytime.
+              </p>
+            </div>
           </div>
-          <div className="form__row">
-            <label>Image URL</label>
-            <input
-              value={img}
-              onChange={(e) => setImg(e.target.value)}
-              placeholder="https://…"
-            />
-          </div>
-          <div className="form__row">
-            <label>Price (ETH)</label>
-            <input
-              type="number"
-              step="0.0001"
-              min="0"
-              value={priceEth}
-              onChange={(e) => setPriceEth(e.target.value)}
-              placeholder="1.0"
-            />
-          </div>
-          <button className="btn btn--primary" disabled={busy}>
-            {busy ? "Listing…" : "Create Listing"}
-          </button>
-        </form>
+        </div>
       </div>
     </section>
   );
 }
+
 
 export default function App() {
   const [account, setAccount] = useState("");
